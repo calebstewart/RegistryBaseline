@@ -119,24 +119,21 @@ if( $TakeBaseline) {
         # Iterate over all keys found (could have wild cards for user or Control Sets)
         ForEach( $key in (Get-Item ("Registry::$KeyName" -f $Sid)) ){
             if( $BaselineKeys[$KeyName].Count -eq 0 ){
-                # Baseline all values in this key
-                ForEach( $ValueName in $key.GetValueNames() ){
-                    $Baseline += New-Object -TypeName PSobject -Property @{
-                        Key = $key.PSPath;
-                        Name = $ValueName;
-                        Value = $key.GetValue($ValueName);
-                    }
+                # Baseline all values in this key (and ensure no new keys are added)
+                $Baseline += New-Object -TypeName PSobject -Property @{
+                    Key = $key.PSPath;
+                    Type = "match_only";
+                    Name = @( $key.GetValueNames() );
+                    Value = @( $key.GetValueNames() | % { $key.GetValue($_) } );
                 }
-            } else {
+            } elseif( ($BaselineKeys[$KeyName] | Where-Object { $key.GetValueNames().Contains($BaselineKeys[$KeyName]) }).Count > 0 ) {
                 # Baseline only specified values in this key
-                ForEach( $ValueName in $BaselineKeys[$KeyName] ){
-                    if( $key.GetValueNames().Contains($ValueName) ){
-                        $Baseline += New-Object -TypeName PSObject -Property @{
-                            Key = $key.PSPath;
-                            Name = $ValueName;
-                            Value = $key.GetValue($ValueName);
-                        }
-                    }
+                $Baseline += New-Object -TypeName PSObject -Property @{
+                    Key = $key.PSPath;
+                    Type = "match";
+                    Values = $key
+                    Name = @( $BaselineKeys[$KeyName] | Where-Object { $key.GetValueNames().Contains($BaselineKeys[$KeyName]) } );
+                    Value = @( $BaselineKeys[$KeyName] | Where-Object { $key.GetValueNames().Contains($BaselineKeys[$KeyName]) } | % { $key.GetValue($_) } );
                 }
             }
 
@@ -170,13 +167,21 @@ if( $TakeBaseline) {
         # Grab the current values
         $key = Get-Item $KeyInfo.Key
 
-        # Check that the values are correct
-        if( $key.GetValue($KeyInfo.Name) -ne $KeyInfo.Value ){
-            $result += New-Object -TypeName PSobject -Property @{
-                Key = $KeyInfo.Key;
-                Name = $KeyInfo.Name;
-                Value = $key.GetValue($KeyInfo.Name);
-                Baseline = $KeyInfo.Value;
+        ForEach( $ValueName in $key.GetValueNames() ) {
+            if( $KeyInfo.Type -eq "match_only" -and -not $KeyInfo.Name.Contains($ValueName) ){
+                $result += New-Object -TypeName PSObject -Property @{
+                    Key = $KeyInfo.Key;
+                    Name = $ValueName;
+                    Value = $key.GetValue($ValueName);
+                    Baseline = $null;
+                }
+            } elseif( ($KeyInfo.Value[$KeyInfo.Name.IndexOf($ValueName)]) -ne $key.GetValue($ValueName) ){
+                $result += New-Object -TypeName PSObject -Property @{
+                    Key = $KeyInfo.Key;
+                    Name = $ValueName;
+                    Value = $key.GetValue($ValueName);
+                    Baseline = $KeyInfo.Value[$KeyInfo.Name.IndexOf($ValueName)];
+                }
             }
         }
 
